@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from starlette import requests, status
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.telemetry import auth_attempts
 
 from app.api.dependencies.database import get_repository
 from app.core.config import get_app_settings
@@ -55,6 +56,7 @@ def _get_authorization_header(
             detail=strings.WRONG_TOKEN_PREFIX,
         )
     if token_prefix != settings.jwt_token_prefix:
+        auth_attempts.add(1, {"outcome": "denied", "reason": "wrong_token_prefix"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=strings.WRONG_TOKEN_PREFIX,
@@ -86,6 +88,7 @@ async def _get_current_user(
             str(settings.secret_key.get_secret_value()),
         )
     except ValueError:
+        auth_attempts.add(1, {"outcome": "denied", "reason": "invalid_signature"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=strings.MALFORMED_PAYLOAD,
@@ -94,6 +97,7 @@ async def _get_current_user(
     try:
         return await users_repo.get_user_by_username(username=username)
     except EntityDoesNotExist:
+        auth_attempts.add(1, {"outcome": "denied", "reason": "user_not_found"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=strings.MALFORMED_PAYLOAD,
