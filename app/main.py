@@ -8,7 +8,7 @@ from app.api.errors.validation_error import http422_error_handler
 from app.api.routes.api import router as api_router
 from app.core.config import get_app_settings
 from app.core.events import create_start_app_handler, create_stop_app_handler
-from app.core.telemetry import setup_telemetry, instrument_fastapi_app, active_requests_gauge, ACTIVE_REQUESTS
+from app.core.telemetry import setup_telemetry, instrument_fastapi_app, ACTIVE_REQUESTS
 
 import time
 from starlette.requests import Request
