@@ -209,19 +209,21 @@ def _install_slow_request_middleware(app: FastAPI) -> None:
                 status_code = 500
                 outcome = "failure"
             else:
-                status_code = response.status_code
+                status_code = response.status_code if response is not None else 500
                 outcome = "success" if status_code < 500 else "failure"
 
-            request_outcome_counter.add(
-                1,
-                {
-                    "http.route": route,
-                    "outcome": outcome,
-                    "http.response.status_code": status_code,
-                },
-            )
+            if request_outcome_counter is not None:
+                request_outcome_counter.add(
+                    1,
+                    {
+                        "http.route": route,
+                        "outcome": outcome,
+                        "http.response.status_code": status_code,
+                    },
+                )
             tenant_bucket = _tenant_bucket(request.headers.get("X-API-Key"))
-            request_rate_counter.add(1, {"http.route": route, "tenant_bucket": tenant_bucket})
+            if request_rate_counter is not None:
+                request_rate_counter.add(1, {"http.route": route, "tenant_bucket": tenant_bucket})
 
         return response
 
