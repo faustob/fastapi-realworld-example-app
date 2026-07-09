@@ -52,19 +52,17 @@ def configure_telemetry() -> None:
 
     try:
         tracer_provider = TracerProvider(resource=resource)
-        span_exporter_kwargs = {}
-        if otlp_endpoint:
-            span_exporter_kwargs["endpoint"] = f"{otlp_endpoint}/v1/traces"
-        tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(**span_exporter_kwargs)))
+        span_exporter = OTLPSpanExporter(endpoint=f"{otlp_endpoint}/v1/traces") if otlp_endpoint else OTLPSpanExporter()
+        tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
         trace.set_tracer_provider(tracer_provider)
     except Exception:  # pragma: no cover - defensive against re-registration
         logger.warning("TracerProvider already registered; using existing global provider", exc_info=True)
 
     try:
-        metric_exporter_kwargs = {}
-        if otlp_endpoint:
-            metric_exporter_kwargs["endpoint"] = f"{otlp_endpoint}/v1/metrics"
-        metric_reader = PeriodicExportingMetricReader(OTLPMetricExporter(**metric_exporter_kwargs))
+        metric_exporter = (
+            OTLPMetricExporter(endpoint=f"{otlp_endpoint}/v1/metrics") if otlp_endpoint else OTLPMetricExporter()
+        )
+        metric_reader = PeriodicExportingMetricReader(metric_exporter)
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(meter_provider)
     except Exception:  # pragma: no cover - defensive against re-registration
