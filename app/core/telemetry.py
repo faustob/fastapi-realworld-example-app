@@ -11,7 +11,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.resources import Resource  # type: ignore[attr-defined]
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -156,7 +156,7 @@ class SaturationMiddleware(BaseHTTPMiddleware):
                 span.add_event(
                     "slow_request",
                     {
-                        "http.route": route_template,
+                        "http.route": route_template or "UNKNOWN",
                         "duration.seconds": elapsed,
                         "budget.seconds": _P99_BUDGET_SECONDS,
                     },
