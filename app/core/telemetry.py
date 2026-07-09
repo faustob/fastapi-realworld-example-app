@@ -77,20 +77,18 @@ def setup_telemetry(service_name: str = "conduit") -> None:
 
     try:
         tracer_provider = TracerProvider(resource=resource)
-        span_exporter_kwargs = {}
-        if otlp_endpoint:
-            span_exporter_kwargs["endpoint"] = otlp_endpoint
-        span_exporter = OTLPSpanExporter(**span_exporter_kwargs)
+        span_exporter = (
+            OTLPSpanExporter(endpoint=otlp_endpoint) if otlp_endpoint else OTLPSpanExporter()
+        )
         tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
         trace.set_tracer_provider(tracer_provider)
     except Exception:  # pragma: no cover
         logger.exception("Failed to initialize tracer provider; continuing with existing provider")
 
     try:
-        metric_exporter_kwargs = {}
-        if otlp_endpoint:
-            metric_exporter_kwargs["endpoint"] = otlp_endpoint
-        metric_exporter = OTLPMetricExporter(**metric_exporter_kwargs)
+        metric_exporter = (
+            OTLPMetricExporter(endpoint=otlp_endpoint) if otlp_endpoint else OTLPMetricExporter()
+        )
         metric_reader = PeriodicExportingMetricReader(metric_exporter)
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(meter_provider)
