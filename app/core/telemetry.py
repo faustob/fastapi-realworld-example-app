@@ -12,7 +12,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.resources import Resource  # type: ignore[attr-defined]
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -92,6 +92,7 @@ def _build_instruments() -> None:
         unit="{worker}",
         description="Configured worker pool size",
     )
+    assert worker_pool_size_updowncounter is not None
     worker_pool_size_updowncounter.add(_WORKER_POOL_SIZE)
 
     flow_entry_counter = _meter.create_counter(
@@ -140,6 +141,8 @@ def setup_telemetry(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def _saturation_and_outcome_middleware(request: Request, call_next):
+        assert active_requests_updowncounter is not None
+        assert request_outcome_counter is not None
         active_requests_updowncounter.add(1)
         start = time.monotonic()
         route_template = request.url.path
@@ -150,6 +153,7 @@ def setup_telemetry(app: FastAPI) -> None:
             return response
         finally:
             duration = time.monotonic() - start
+            assert active_requests_updowncounter is not None
             active_requests_updowncounter.add(-1)
             matched_route = request.scope.get("route")
             if matched_route is not None and hasattr(matched_route, "path"):
