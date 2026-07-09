@@ -8,6 +8,10 @@ from app.api.errors.validation_error import http422_error_handler
 from app.api.routes.api import router as api_router
 from app.core.config import get_app_settings
 from app.core.events import create_start_app_handler, create_stop_app_handler
+from app.core.telemetry import setup_telemetry, instrument_fastapi_app, active_requests_gauge, ACTIVE_REQUESTS
+
+import time
+from starlette.requests import Request
 
 
 def get_application() -> FastAPI:
@@ -15,7 +19,11 @@ def get_application() -> FastAPI:
 
     settings.configure_logging()
 
+    setup_telemetry(service_name=settings.fastapi_kwargs.get("title", "conduit-api"))
+
     application = FastAPI(**settings.fastapi_kwargs)
+
+    instrument_fastapi_app(application)
 
     application.add_middleware(
         CORSMiddleware,
@@ -24,6 +32,15 @@ def get_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @application.middleware("http")
+    async def track_active_requests(request: Request, call_next):
+        ACTIVE_REQUESTS.add(1)
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            ACTIVE_REQUESTS.add(-1)
 
     application.add_event_handler(
         "startup",
