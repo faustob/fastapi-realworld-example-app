@@ -7,7 +7,9 @@ from app.api.errors.http_error import http_error_handler
 from app.api.errors.validation_error import http422_error_handler
 from app.api.routes.api import router as api_router
 from app.core.config import get_app_settings
+from app.api.middleware.telemetry_middleware import ActiveRequestsMiddleware
 from app.core.events import create_start_app_handler, create_stop_app_handler
+from app.core.telemetry import setup_telemetry
 
 
 def get_application() -> FastAPI:
@@ -16,6 +18,10 @@ def get_application() -> FastAPI:
     settings.configure_logging()
 
     application = FastAPI(**settings.fastapi_kwargs)
+
+    setup_telemetry(application)
+
+    application.add_middleware(ActiveRequestsMiddleware)
 
     application.add_middleware(
         CORSMiddleware,
