@@ -36,4 +36,44 @@ P99_BUDGET_SECONDS = 0.750
 
 
 def _route_template(request: Request) -> str:
-    route = request.scope.get(
+    route = request.scope.get("route")
+    if route is not None and hasattr(route, "path"):
+        return route.path
+    return request.url.path
+
+
+class TelemetryMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        route = _route_template(request)
+        method = request.method
+
+        active_requests_gauge.add(1, {"http.request.method": method})
+        start_time = time.monotonic()
+        try:
+            with tracer.start_as_current_span(f"{method} {route}"):
+                response = await call_next(request)
+        finally:
+            duration = time.monotonic() - start_time
+            active_requests_gauge.add(-1, {"http.request.method": method})
+
+        status_code = response.status_code
+        attributes = {
+            "http.request.method": method,
+            "http.route": route,
+            "http.response.status_code": status_code,
+        }
+
+        request_duration_histogram.record(duration, attributes)
+        request_rate_counter.add(1, attributes)
+
+        outcome = "success" if status_code < 400 else "error"
+        request_outcome_counter.add(
+            1,
+            {
+                "http.request.method": method,
+                "http.route": route,
+                "outcome": outcome,
+            },
+        )
+
+        return response
