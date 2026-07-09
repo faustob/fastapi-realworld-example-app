@@ -8,7 +8,8 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -35,7 +36,7 @@ def setup_telemetry() -> None:
             endpoint,
         )
 
-    resource = Resource.create({SERVICE_NAME: service_name})
+    resource = Resource.create({ResourceAttributes.SERVICE_NAME: service_name})
 
     try:
         span_exporter = OTLPSpanExporter(endpoint=endpoint)
