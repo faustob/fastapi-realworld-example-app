@@ -8,6 +8,8 @@ from app.api.errors.validation_error import http422_error_handler
 from app.api.routes.api import router as api_router
 from app.core.config import get_app_settings
 from app.core.events import create_start_app_handler, create_stop_app_handler
+from app.core.telemetry import setup_telemetry
+from app.core.flow_middleware import PrimaryFlowMiddleware
 
 
 def get_application() -> FastAPI:
@@ -15,7 +17,11 @@ def get_application() -> FastAPI:
 
     settings.configure_logging()
 
+    setup_telemetry(service_name="fastapi-realworld-example-app")
+
     application = FastAPI(**settings.fastapi_kwargs)
+
+    application.add_middleware(PrimaryFlowMiddleware)
 
     application.add_middleware(
         CORSMiddleware,
@@ -24,6 +30,13 @@ def get_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        FastAPIInstrumentor.instrument_app(application)
+    except Exception:
+        pass
 
     application.add_event_handler(
         "startup",
