@@ -29,8 +29,8 @@ _TELEMETRY_INITIALIZED = False
 # Aligned with the HTTP Response Time P99 budget (750 ms).
 SLOW_REQUEST_THRESHOLD_SECONDS = 0.75
 
-_tracer_provider_ref: TracerProvider = None
-_meter_provider_ref: MeterProvider = None
+_tracer_provider_ref: TracerProvider | None = None
+_meter_provider_ref: MeterProvider | None = None
 
 
 async def shutdown_telemetry() -> None:
@@ -162,7 +162,7 @@ flow_duration_histogram = _meter.create_histogram(
 )
 
 _active_request_count = 0
-_flow_start_times: dict = {}
+_flow_start_times: dict = {}  # type: ignore[type-arg]
 
 
 async def telemetry_middleware(request: Request, call_next: Callable):
