@@ -1,9 +1,18 @@
+import time
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST
 
 from app.api.dependencies.database import get_repository
 from app.core.config import get_app_settings
 from app.core.settings.app import AppSettings
+from app.core.telemetry import (
+    auth_attempts_counter,
+    flow_duration_histogram,
+    flow_entry_counter,
+    flow_entry_to_terminal_histogram,
+    flow_outcome_counter,
+)
 from app.db.errors import EntityDoesNotExist
 from app.db.repositories.users import UsersRepository
 from app.models.schemas.users import (
@@ -33,11 +42,20 @@ async def login(
     try:
         user = await users_repo.get_user_by_email(email=user_login.email)
     except EntityDoesNotExist as existence_error:
+        auth_attempts_counter.add(
+            1,
+            {"outcome": "denied", "reason": "user_not_found"},
+        )
         raise wrong_login_error from existence_error
 
     if not user.check_password(user_login.password):
+        auth_attempts_counter.add(
+            1,
+            {"outcome": "denied", "reason": "wrong_password"},
+        )
         raise wrong_login_error
 
+    auth_attempts_counter.add(1, {"outcome": "allowed", "reason": "valid_credentials"})
     token = jwt.create_access_token_for_user(
         user,
         str(settings.secret_key.get_secret_value()),
@@ -64,13 +82,24 @@ async def register(
     users_repo: UsersRepository = Depends(get_repository(UsersRepository)),
     settings: AppSettings = Depends(get_app_settings),
 ) -> UserInResponse:
+    flow_entry_counter.add(1, {"flow": "registration_to_publish"})
+    _flow_start_time = time.monotonic()
+
     if await check_username_is_taken(users_repo, user_create.username):
+        flow_outcome_counter.add(
+            1,
+            {"flow": "registration_to_publish", "outcome": "failure"},
+        )
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
             detail=strings.USERNAME_TAKEN,
         )
 
     if await check_email_is_taken(users_repo, user_create.email):
+        flow_outcome_counter.add(
+            1,
+            {"flow": "registration_to_publish", "outcome": "failure"},
+        )
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
             detail=strings.EMAIL_TAKEN,
@@ -81,6 +110,19 @@ async def register(
     token = jwt.create_access_token_for_user(
         user,
         str(settings.secret_key.get_secret_value()),
+    )
+    flow_duration = time.monotonic() - _flow_start_time
+    flow_outcome_counter.add(
+        1,
+        {"flow": "registration_to_publish", "outcome": "success"},
+    )
+    flow_duration_histogram.record(
+        flow_duration,
+        {"flow": "registration_to_publish", "outcome": "success"},
+    )
+    flow_entry_to_terminal_histogram.record(
+        flow_duration,
+        {"flow": "registration_to_publish", "terminal_state": "success"},
     )
     return UserInResponse(
         user=UserWithToken(
