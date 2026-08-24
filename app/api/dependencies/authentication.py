@@ -13,6 +13,7 @@ from app.db.errors import EntityDoesNotExist
 from app.db.repositories.users import UsersRepository
 from app.models.domain.users import User
 from app.resources import strings
+from app.core.telemetry import auth_attempts_counter
 from app.services import jwt
 
 HEADER_KEY = "Authorization"
@@ -86,18 +87,23 @@ async def _get_current_user(
             str(settings.secret_key.get_secret_value()),
         )
     except ValueError:
+        auth_attempts_counter.add(1, {"outcome": "denied", "reason": "invalid_token"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=strings.MALFORMED_PAYLOAD,
         )
 
     try:
-        return await users_repo.get_user_by_username(username=username)
+        user = await users_repo.get_user_by_username(username=username)
     except EntityDoesNotExist:
+        auth_attempts_counter.add(1, {"outcome": "denied", "reason": "user_not_found"})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=strings.MALFORMED_PAYLOAD,
         )
+
+    auth_attempts_counter.add(1, {"outcome": "granted"})
+    return user
 
 
 async def _get_current_user_optional(

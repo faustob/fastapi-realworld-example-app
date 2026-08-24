@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST
 
@@ -13,6 +15,14 @@ from app.models.schemas.users import (
     UserWithToken,
 )
 from app.resources import strings
+from app.core.telemetry import (
+    auth_attempts_counter,
+    flow_duration_histogram,
+    flow_entry_counter,
+    flow_entry_to_terminal_histogram,
+    flow_outcomes_counter,
+    flow_validation_counter,
+)
 from app.services import jwt
 from app.services.authentication import check_email_is_taken, check_username_is_taken
 
@@ -33,15 +43,18 @@ async def login(
     try:
         user = await users_repo.get_user_by_email(email=user_login.email)
     except EntityDoesNotExist as existence_error:
+        auth_attempts_counter.add(1, {"outcome": "denied", "reason": "user_not_found"})
         raise wrong_login_error from existence_error
 
     if not user.check_password(user_login.password):
+        auth_attempts_counter.add(1, {"outcome": "denied", "reason": "wrong_password"})
         raise wrong_login_error
 
     token = jwt.create_access_token_for_user(
         user,
         str(settings.secret_key.get_secret_value()),
     )
+    auth_attempts_counter.add(1, {"outcome": "granted"})
     return UserInResponse(
         user=UserWithToken(
             username=user.username,
@@ -64,23 +77,52 @@ async def register(
     users_repo: UsersRepository = Depends(get_repository(UsersRepository)),
     settings: AppSettings = Depends(get_app_settings),
 ) -> UserInResponse:
+    flow_entry_counter.add(1, {"flow": "registration_to_publish"})
+    flow_start_time = time.perf_counter()
+
     if await check_username_is_taken(users_repo, user_create.username):
+        flow_validation_counter.add(
+            1,
+            {"step": "username_uniqueness", "outcome": "failed"},
+        )
+        flow_outcomes_counter.add(
+            1,
+            {"flow": "registration_to_publish", "outcome": "failure"},
+        )
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
             detail=strings.USERNAME_TAKEN,
         )
+    flow_validation_counter.add(1, {"step": "username_uniqueness", "outcome": "passed"})
 
     if await check_email_is_taken(users_repo, user_create.email):
+        flow_validation_counter.add(1, {"step": "email_uniqueness", "outcome": "failed"})
+        flow_outcomes_counter.add(
+            1,
+            {"flow": "registration_to_publish", "outcome": "failure"},
+        )
         raise HTTPException(
             status_code=HTTP_400_BAD_REQUEST,
             detail=strings.EMAIL_TAKEN,
         )
+    flow_validation_counter.add(1, {"step": "email_uniqueness", "outcome": "passed"})
 
     user = await users_repo.create_user(**user_create.dict())
 
     token = jwt.create_access_token_for_user(
         user,
         str(settings.secret_key.get_secret_value()),
+    )
+
+    flow_elapsed = time.perf_counter() - flow_start_time
+    flow_duration_histogram.record(flow_elapsed, {"flow": "registration_to_publish"})
+    flow_entry_to_terminal_histogram.record(
+        flow_elapsed,
+        {"flow": "registration_to_publish", "terminal_state": "registered"},
+    )
+    flow_outcomes_counter.add(
+        1,
+        {"flow": "registration_to_publish", "outcome": "success"},
     )
     return UserInResponse(
         user=UserWithToken(
