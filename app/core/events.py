@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from loguru import logger
 
 from app.core.settings.app import AppSettings
+from app.core.telemetry import shutdown_telemetry
 from app.db.events import close_db_connection, connect_to_db
 
 
@@ -21,5 +22,6 @@ def create_stop_app_handler(app: FastAPI) -> Callable:  # type: ignore
     @logger.catch
     async def stop_app() -> None:
         await close_db_connection(app)
+        shutdown_telemetry()
 
     return stop_app

@@ -15,6 +15,12 @@ from app.models.schemas.users import (
 from app.resources import strings
 from app.services import jwt
 from app.services.authentication import check_email_is_taken, check_username_is_taken
+from app.core.telemetry import (
+    flow_entries_total,
+    flow_outcome,
+    flow_validation_outcomes_total,
+    validation_step,
+)
 
 router = APIRouter()
 
@@ -64,30 +70,37 @@ async def register(
     users_repo: UsersRepository = Depends(get_repository(UsersRepository)),
     settings: AppSettings = Depends(get_app_settings),
 ) -> UserInResponse:
-    if await check_username_is_taken(users_repo, user_create.username):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail=strings.USERNAME_TAKEN,
+    flow_entries_total.add(1, {"flow.step": "register"})
+    with flow_outcome("register"):
+        flow_validation_outcomes_total.add(1, {"outcome": "passed", "validation.step": "schema"})
+        with validation_step("username_uniqueness") as username_check:
+            if await check_username_is_taken(users_repo, user_create.username):
+                username_check["failed"] = True
+                raise HTTPException(
+                    status_code=HTTP_400_BAD_REQUEST,
+                    detail=strings.USERNAME_TAKEN,
+                )
+
+        with validation_step("email_uniqueness") as email_check:
+            if await check_email_is_taken(users_repo, user_create.email):
+                email_check["failed"] = True
+                raise HTTPException(
+                    status_code=HTTP_400_BAD_REQUEST,
+                    detail=strings.EMAIL_TAKEN,
+                )
+
+        user = await users_repo.create_user(**user_create.dict())
+
+        token = jwt.create_access_token_for_user(
+            user,
+            str(settings.secret_key.get_secret_value()),
         )
-
-    if await check_email_is_taken(users_repo, user_create.email):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail=strings.EMAIL_TAKEN,
+        return UserInResponse(
+            user=UserWithToken(
+                username=user.username,
+                email=user.email,
+                bio=user.bio,
+                image=user.image,
+                token=token,
+            ),
         )
-
-    user = await users_repo.create_user(**user_create.dict())
-
-    token = jwt.create_access_token_for_user(
-        user,
-        str(settings.secret_key.get_secret_value()),
-    )
-    return UserInResponse(
-        user=UserWithToken(
-            username=user.username,
-            email=user.email,
-            bio=user.bio,
-            image=user.image,
-            token=token,
-        ),
-    )
