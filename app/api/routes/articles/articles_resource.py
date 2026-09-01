@@ -23,6 +23,12 @@ from app.models.schemas.articles import (
 )
 from app.resources import strings
 from app.services.articles import check_article_exists, get_slug_for_article
+from app.core.telemetry import (
+    flow_entries_total,
+    flow_outcome,
+    flow_validation_outcomes_total,
+    validation_step,
+)
 
 router = APIRouter()
 
@@ -61,22 +67,27 @@ async def create_new_article(
     user: User = Depends(get_current_user_authorizer()),
     articles_repo: ArticlesRepository = Depends(get_repository(ArticlesRepository)),
 ) -> ArticleInResponse:
-    slug = get_slug_for_article(article_create.title)
-    if await check_article_exists(articles_repo, slug):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=strings.ARTICLE_ALREADY_EXISTS,
-        )
+    flow_entries_total.add(1, {"flow.step": "publish_article"})
+    flow_validation_outcomes_total.add(1, {"outcome": "passed", "validation.step": "schema"})
+    with flow_outcome("publish_article"):
+        slug = get_slug_for_article(article_create.title)
+        with validation_step("article_slug_uniqueness") as slug_check:
+            if await check_article_exists(articles_repo, slug):
+                slug_check["failed"] = True
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=strings.ARTICLE_ALREADY_EXISTS,
+                )
 
-    article = await articles_repo.create_article(
-        slug=slug,
-        title=article_create.title,
-        description=article_create.description,
-        body=article_create.body,
-        author=user,
-        tags=article_create.tags,
-    )
-    return ArticleInResponse(article=ArticleForResponse.from_orm(article))
+        article = await articles_repo.create_article(
+            slug=slug,
+            title=article_create.title,
+            description=article_create.description,
+            body=article_create.body,
+            author=user,
+            tags=article_create.tags,
+        )
+        return ArticleInResponse(article=ArticleForResponse.from_orm(article))
 
 
 @router.get("/{slug}", response_model=ArticleInResponse, name="articles:get-article")

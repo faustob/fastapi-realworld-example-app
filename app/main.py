@@ -1,3 +1,5 @@
+import app.core.telemetry  # noqa: F401  side-effect: registers the global OTel SDK before serving
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
