@@ -1,3 +1,4 @@
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
@@ -10,6 +11,13 @@ from app.api.dependencies.articles import (
 )
 from app.api.dependencies.authentication import get_current_user_authorizer
 from app.api.dependencies.database import get_repository
+from app.core.telemetry import (
+    flow_duration_histogram,
+    flow_entry_counter,
+    flow_outcome_counter,
+    tracer,
+    validation_outcome_counter,
+)
 from app.db.repositories.articles import ArticlesRepository
 from app.models.domain.articles import Article
 from app.models.domain.users import User
@@ -61,22 +69,52 @@ async def create_new_article(
     user: User = Depends(get_current_user_authorizer()),
     articles_repo: ArticlesRepository = Depends(get_repository(ArticlesRepository)),
 ) -> ArticleInResponse:
-    slug = get_slug_for_article(article_create.title)
-    if await check_article_exists(articles_repo, slug):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=strings.ARTICLE_ALREADY_EXISTS,
-        )
+    flow_entry_counter.add(1, {"flow": "publish_article"})
+    flow_start_time = time.monotonic()
+    flow_outcome = "failure"
+    with tracer.start_as_current_span("flow.publish_article") as flow_span:
+        try:
+            slug = get_slug_for_article(article_create.title)
+            with tracer.start_as_current_span(
+                "flow.validate.slug_uniqueness",
+            ) as validation_span:
+                slug_already_exists = await check_article_exists(articles_repo, slug)
+                validation_outcome = "failed" if slug_already_exists else "passed"
+                validation_span.set_attribute("validation.outcome", validation_outcome)
+                validation_outcome_counter.add(
+                    1,
+                    {
+                        "flow": "publish_article",
+                        "step": "slug_uniqueness",
+                        "outcome": validation_outcome,
+                    },
+                )
+            if slug_already_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=strings.ARTICLE_ALREADY_EXISTS,
+                )
 
-    article = await articles_repo.create_article(
-        slug=slug,
-        title=article_create.title,
-        description=article_create.description,
-        body=article_create.body,
-        author=user,
-        tags=article_create.tags,
-    )
-    return ArticleInResponse(article=ArticleForResponse.from_orm(article))
+            article = await articles_repo.create_article(
+                slug=slug,
+                title=article_create.title,
+                description=article_create.description,
+                body=article_create.body,
+                author=user,
+                tags=article_create.tags,
+            )
+            flow_outcome = "success"
+            return ArticleInResponse(article=ArticleForResponse.from_orm(article))
+        finally:
+            flow_span.set_attribute("flow.outcome", flow_outcome)
+            flow_outcome_counter.add(
+                1,
+                {"flow": "publish_article", "outcome": flow_outcome},
+            )
+            flow_duration_histogram.record(
+                time.monotonic() - flow_start_time,
+                {"flow": "publish_article"},
+            )
 
 
 @router.get("/{slug}", response_model=ArticleInResponse, name="articles:get-article")
