@@ -4,6 +4,11 @@ from starlette.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST
 from app.api.dependencies.database import get_repository
 from app.core.config import get_app_settings
 from app.core.settings.app import AppSettings
+from app.core.telemetry import (
+    flow_entries_counter,
+    flow_validation_outcomes_counter,
+    tracer,
+)
 from app.db.errors import EntityDoesNotExist
 from app.db.repositories.users import UsersRepository
 from app.models.schemas.users import (
@@ -64,17 +69,42 @@ async def register(
     users_repo: UsersRepository = Depends(get_repository(UsersRepository)),
     settings: AppSettings = Depends(get_app_settings),
 ) -> UserInResponse:
-    if await check_username_is_taken(users_repo, user_create.username):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail=strings.USERNAME_TAKEN,
-        )
+    flow_entries_counter.add(1, {"flow.name": "primary_flow"})
 
-    if await check_email_is_taken(users_repo, user_create.email):
-        raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST,
-            detail=strings.EMAIL_TAKEN,
+    with tracer.start_as_current_span("primary_flow.validate_registration") as validation_span:
+        username_taken = await check_username_is_taken(users_repo, user_create.username)
+        flow_validation_outcomes_counter.add(
+            1,
+            {
+                "flow.name": "primary_flow",
+                "validation.step": "username_uniqueness",
+                "validation.outcome": "failed" if username_taken else "passed",
+            },
         )
+        if username_taken:
+            validation_span.set_attribute("validation.outcome", "failed")
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail=strings.USERNAME_TAKEN,
+            )
+
+        email_taken = await check_email_is_taken(users_repo, user_create.email)
+        flow_validation_outcomes_counter.add(
+            1,
+            {
+                "flow.name": "primary_flow",
+                "validation.step": "email_uniqueness",
+                "validation.outcome": "failed" if email_taken else "passed",
+            },
+        )
+        if email_taken:
+            validation_span.set_attribute("validation.outcome", "failed")
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail=strings.EMAIL_TAKEN,
+            )
+
+        validation_span.set_attribute("validation.outcome", "passed")
 
     user = await users_repo.create_user(**user_create.dict())
 
